@@ -220,135 +220,170 @@ pub fn msm_trans_g_to_c<C: CurveAffine>(
 ///
 /// This will use multithreading if beneficial.
 pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
-    assert_eq!(coeffs.len(), bases.len());
+    // assert_eq!(coeffs.len(), bases.len());
 
-    // #[cfg(feature = "gpu")]
-    // 2^14次方以上调用GPU计算
-    if coeffs.len() > 16384
-    {    
-        let cpu_num = num_cpus::get();
-        let scale = coeffs.len();
-        // 开辟线程
-        let mut handles = Vec::new();
-        let avg = scale / (cpu_num * 2 / 5);
-        let thread_num = scale / avg + 1;
+    // // #[cfg(feature = "gpu")]
+    // // 2^14次方以上调用GPU计算
+    // if coeffs.len() > 16384
+    // {    
+    //     let cpu_num = num_cpus::get();
+    //     let scale = coeffs.len();
+    //     // 开辟线程
+    //     let mut handles = Vec::new();
+    //     let avg = scale / (cpu_num * 2 / 5);
+    //     let thread_num = scale / avg + 1;
 
-        // 创建可复制指针
-        let bases_254 = Arc::new(msm_trans_c_to_g1(&bases));
-        let coeffs_254 : Arc<Vec<Fr>> = Arc::new(msm_trans_c_to_fr::<C>(&coeffs)); 
+    //     // 创建可复制指针
+    //     let bases_254 = Arc::new(msm_trans_c_to_g1(&bases));
+    //     let coeffs_254 : Arc<Vec<Fr>> = Arc::new(msm_trans_c_to_fr::<C>(&coeffs)); 
 
-        // 基本数据通道
-        let (tx                       , rx) = channel();
+    //     // 基本数据通道
+    //     let (tx                       , rx) = channel();
 
-        for variable_i in 0..thread_num {
-            let base_pointer = bases_254.clone();
-            let coeff_pointer = coeffs_254.clone();
-            let tx_pointer = tx.clone();
+    //     for variable_i in 0..thread_num {
+    //         let base_pointer = bases_254.clone();
+    //         let coeff_pointer = coeffs_254.clone();
+    //         let tx_pointer = tx.clone();
 
-            handles.push(thread::spawn(move || {
-                let lower_bound = avg * variable_i;
-                let mut upper_bound = avg * (variable_i + 1);
-                if upper_bound > scale {
-                    upper_bound = scale;
-                }
-                // println!("lower_bound:{:?}, upper_bound:{:?}\n", lower_bound, upper_bound);
-                for _j in lower_bound..upper_bound {
-                    let a = BigInteger256(transform::from_u8_to_big_int256(
-                        &coeff_pointer.get(_j).unwrap().to_bytes(),
-                    ));
-                    let b = transform::h2c_affine_to_ark_point(*base_pointer.get(_j).unwrap())
-                        .into_affine();
-                    tx_pointer.send((a, b)).unwrap();
-                }
-            }));
+    //         handles.push(thread::spawn(move || {
+    //             let lower_bound = avg * variable_i;
+    //             let mut upper_bound = avg * (variable_i + 1);
+    //             if upper_bound > scale {
+    //                 upper_bound = scale;
+    //             }
+    //             // println!("lower_bound:{:?}, upper_bound:{:?}\n", lower_bound, upper_bound);
+    //             for _j in lower_bound..upper_bound {
+    //                 let a = BigInteger256(transform::from_u8_to_big_int256(
+    //                     &coeff_pointer.get(_j).unwrap().to_bytes(),
+    //                 ));
+    //                 let b = transform::h2c_affine_to_ark_point(*base_pointer.get(_j).unwrap())
+    //                     .into_affine();
+    //                 tx_pointer.send((a, b)).unwrap();
+    //             }
+    //         }));
+    //     }
+
+    //     let handle = thread::spawn(move || {
+    //         // 设定转换接收数组
+    //         let mut ark_coeff = Vec::with_capacity(scale);
+    //         let mut ark_base = Vec::with_capacity(scale);
+    //         // let mut count = 0;
+    //         loop {
+    //             if let Ok((coeff, base)) = rx.recv() {
+    //                 // count = count + 1;
+    //                 // if count == test_scale {
+    //                 //     break;
+    //                 // }
+    //                 ark_coeff.push(coeff);
+    //                 ark_base.push(base);
+    //             }
+    //             if ark_coeff.len() == scale && ark_base.len() == scale {
+    //                 break;
+    //             }
+    //         }
+    //         return (ark_coeff, ark_base);
+    //     });
+
+    //     for handle in handles {
+    //         handle.join().unwrap();
+    //     }
+
+    //     let (ark_coeff, ark_base) = handle.join().unwrap();
+
+    //     println!("Before Computing\n");
+
+    //     let ark_msm_result =
+    //         multi_scalar_mult_arkworks(&ark_base.as_slice(), &ark_coeff.as_slice());
+
+    //     println!("Before\n");
+
+    //     let ark_back = transform::ark_to_h2c_point(ark_msm_result);
+
+    //     msm_trans_g_to_c::<C>(ark_back)
+    // }  
+    // else {
+    //     let num_threads = multicore::current_num_threads();
+    //     if coeffs.len() > num_threads {
+    //         let chunk = coeffs.len() / num_threads;
+    //         let num_chunks = coeffs.chunks(chunk).len();
+    //         let mut results = vec![C::Curve::identity(); num_chunks];
+    //         multicore::scope(|scope| {
+    //             let chunk = coeffs.len() / num_threads;
+
+    //             for ((coeffs, bases), acc) in coeffs
+    //                 .chunks(chunk)
+    //                 .zip(bases.chunks(chunk))
+    //                 .zip(results.iter_mut())
+    //             {
+    //                 scope.spawn(move |_| {
+    //                     multiexp_serial(coeffs, bases, acc);
+    //                 });
+    //             }
+    //         });
+    //         results.iter().fold(C::Curve::identity(), |a, b| a + b)
+    //     } else {
+    //         let mut acc = C::Curve::identity();
+    //         multiexp_serial(coeffs, bases, &mut acc);
+    //         acc
+    //     }
+
+        // // 创建可复制指针
+        let bases_254 = msm_trans_c_to_g1(&bases);
+        let coeffs_254 = msm_trans_c_to_fr::<C>(&coeffs); 
+        let mut ark_coeff = Vec::with_capacity(coeffs.len());
+        let mut ark_base = Vec::with_capacity(coeffs.len());
+
+        for _i in 0..coeffs.len() {
+            let temp = coeffs_254.get(_i).unwrap().to_bytes();
+            let a = BigInteger256(transform::from_u8_to_big_int256(&temp));
+            let b = transform::h2c_affine_to_ark_point(*bases_254.get(_i).unwrap()).into_affine();
+            ark_coeff.push(a);
+            ark_base.push(b);
         }
-
-        let handle = thread::spawn(move || {
-            // 设定转换接收数组
-            let mut ark_coeff = Vec::with_capacity(scale);
-            let mut ark_base = Vec::with_capacity(scale);
-            // let mut count = 0;
-            loop {
-                if let Ok((coeff, base)) = rx.recv() {
-                    // count = count + 1;
-                    // if count == test_scale {
-                    //     break;
-                    // }
-                    ark_coeff.push(coeff);
-                    ark_base.push(base);
-                }
-                if ark_coeff.len() == scale && ark_base.len() == scale {
-                    break;
-                }
-            }
-            return (ark_coeff, ark_base);
-        });
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        let (ark_coeff, ark_base) = handle.join().unwrap();
-
-        println!("Before Computing\n");
-
         let ark_msm_result =
             multi_scalar_mult_arkworks(&ark_base.as_slice(), &ark_coeff.as_slice());
-
-        println!("Before\n");
 
         let ark_back = transform::ark_to_h2c_point(ark_msm_result);
 
         msm_trans_g_to_c::<C>(ark_back)
-    }  
-    else {
-        let num_threads = multicore::current_num_threads();
-        if coeffs.len() > num_threads {
-            let chunk = coeffs.len() / num_threads;
-            let num_chunks = coeffs.chunks(chunk).len();
-            let mut results = vec![C::Curve::identity(); num_chunks];
-            multicore::scope(|scope| {
-                let chunk = coeffs.len() / num_threads;
-
-                for ((coeffs, bases), acc) in coeffs
-                    .chunks(chunk)
-                    .zip(bases.chunks(chunk))
-                    .zip(results.iter_mut())
-                {
-                    scope.spawn(move |_| {
-                        multiexp_serial(coeffs, bases, acc);
-                    });
-                }
-            });
-            results.iter().fold(C::Curve::identity(), |a, b| a + b)
-        } else {
-            let mut acc = C::Curve::identity();
-            multiexp_serial(coeffs, bases, &mut acc);
-            acc
-        }
-
-        // // 创建可复制指针
-        // let bases_254 = msm_trans_c_to_g1(&bases);
-        // let coeffs_254 = msm_trans_c_to_fr::<C>(&coeffs); 
-        // let mut ark_coeff = Vec::with_capacity(coeffs.len());
-        // let mut ark_base = Vec::with_capacity(coeffs.len());
-
-        // for _i in 0..coeffs.len() {
-        //     let temp = coeffs_254.get(_i).unwrap().to_bytes();
-        //     let a = BigInteger256(transform::from_u8_to_big_int256(&temp));
-        //     let b = transform::h2c_affine_to_ark_point(*bases_254.get(_i).unwrap()).into_affine();
-        //     ark_coeff.push(a);
-        //     ark_base.push(b);
-        // }
-        // let ark_msm_result =
-        //     multi_scalar_mult_arkworks(&ark_base.as_slice(), &ark_coeff.as_slice());
-
-        // let ark_back = transform::ark_to_h2c_point(ark_msm_result);
-
-        // msm_trans_g_to_c::<C>(ark_back)
-    }  
+      
 
 }
+
+/// Performs a multi-exponentiation operation.
+///
+/// This function will panic if coeffs and bases have a different length.
+///
+/// This will use multithreading if beneficial.
+pub fn best_multiexp1<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
+    assert_eq!(coeffs.len(), bases.len());
+
+    let num_threads = multicore::current_num_threads();
+    if coeffs.len() > num_threads {
+        let chunk = coeffs.len() / num_threads;
+        let num_chunks = coeffs.chunks(chunk).len();
+        let mut results = vec![C::Curve::identity(); num_chunks];
+        multicore::scope(|scope| {
+            let chunk = coeffs.len() / num_threads;
+
+            for ((coeffs, bases), acc) in coeffs
+                .chunks(chunk)
+                .zip(bases.chunks(chunk))
+                .zip(results.iter_mut())
+            {
+                scope.spawn(move |_| {
+                    multiexp_serial(coeffs, bases, acc);
+                });
+            }
+        });
+        results.iter().fold(C::Curve::identity(), |a, b| a + b)
+    } else {
+        let mut acc = C::Curve::identity();
+        multiexp_serial(coeffs, bases, &mut acc);
+        acc
+    }
+}
+
 
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size
 /// $n = 2^k$, when provided `log_n` = $k$ and an element of multiplicative

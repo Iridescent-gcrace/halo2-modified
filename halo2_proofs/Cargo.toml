@@ -25,7 +25,7 @@ rustdoc-args = ["--cfg", "docsrs", "--html-in-header", "katex-header.html"]
 
 
 [[bench]]
-name = "test_exp"
+name = "fft"
 harness = false
 
 [dependencies]
