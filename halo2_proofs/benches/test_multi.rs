@@ -5,10 +5,15 @@ use crate::arithmetic::small_multiexp;
 use crate::halo2curves::bn256::{Fr, G1Affine};
 use crate::halo2curves::pasta::{EqAffine, Fp};
 use ark_bn254::G1Affine as ark254GA;
+
+use ark_bn254::{ G1Projective as ark254GP};
+
+
+use ark_ec::bn::G1Projective;
 use ark_ec::msm::VariableBaseMSM;
 use ark_ec::ProjectiveCurve;
-use ark_ec::short_weierstrass_jacobian::GroupAffine;
-use ark_ff::{BigInteger256, PrimeField};
+use ark_ec::short_weierstrass_jacobian::{GroupAffine, GroupProjective};
+use ark_ff::{BigInteger256, PrimeField, FpParameters};
 use group::ff::Field;
 use group::prime::PrimeCurveAffine;
 use group::{Curve, GroupEncoding};
@@ -19,13 +24,20 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Instant;
 use msm_cuda::{multi_scalar_mult_arkworks, multi_scalar_mult_halo2curve};
-
+use ark_bn254::g1::Parameters;
+// use ark_bn254::g2::Parameters;
 use halo2_proofs::arithmetic::{best_multiexp, best_multiexp1};
 use halo2_proofs::poly::{commitment::ParamsProver, ipa::commitment::ParamsIPA};
+// use ark_bn254::Parameters;
+
+
 
 use criterion::{black_box, Criterion};
 use halo2curves::{bn256, CurveAffine};
 use rand_core::OsRng;
+use tokio::task;
+
+
 
 fn h2c_rand_gen(len: usize) -> Vec<bn256::G1Affine> {
     let mut h2c_ret = Vec::new();
@@ -47,79 +59,13 @@ fn scalar_rand_gen(len: usize) -> Vec<bn256::Fr> {
     scalar_ret
 }
 
-fn test_small_exp(c: &mut Criterion) {
-    let mut rng = OsRng;
-
-    // {
-    //     /// 数据点操作
-
-    //     let test_scale = 1 << 1;
-    //     let base_254: Vec<bn256::G1Affine> = h2c_rand_gen(test_scale);
-    //     let coeff_254 = scalar_rand_gen(test_scale);
-       
-    //     let ret_new = best_multiexp(&coeff_254, &base_254);
-
-    //     for _i in 0..1 {
-    //         println!("坐标点{:?}：{:?}\n", _i, base_254.get(_i).unwrap().x);
-    //         println!("坐标x点按位转换成bytes{:?}",base_254.get(_i).unwrap().x.to_bytes());
 
 
-    //         let qq = ark_bn254::Fq::from_le_bytes_mod_order(&base_254.get(_i).unwrap().x.to_bytes());
-    //         println!("坐标点经过完整转换后产生的值{:?}",qq);
 
-    //         println!("标量值{:?}：{:?}\n", _i, coeff_254.get(_i));
-    //     }
-
-    //     let a = unsafe {
-    //         std::mem::transmute::<halo2curves::bn256::G1, <halo2curves::bn256::G1Affine as PrimeCurveAffine>::Curve>(ret_new);
-    //     };
-        // println!("best_multiexp時长: {}", start_time_1.elapsed().as_millis());
-
-        // let mut ark_coeff: Vec<BigInteger256> = Vec::new();
-        // let mut ark_base: Vec<ark254GA> = Vec::new();
-
-        // let start_time_2 = Instant::now();
-
-        // for _i in 0..test_scale {
-
-        //     let temp = coeff_254.get(_i).unwrap().to_bytes();
-        //     let instant1 = Instant::now();
-
-        //     let a = BigInteger256(transform::from_u8_to_big_int256(&temp));
-
-        //     println!("转换1：{}",instant1.elapsed().as_nanos());
-        //     let instant2 = Instant::now();
-
-        //     let b = transform::h2c_affine_to_ark_point(*base_254.get(_i).unwrap()).into_affine();
-
-        //     println!("转换2：{}",instant2.elapsed().as_nanos());
-
-        //     ark_coeff.push(a);
-        //     ark_base.push(b);
-        // }
-        
-    // }
-
-    // // 获取当前CPU的内核数（逻辑），执行多线程并行策略
+async fn curve_transfer(base_254:&Vec<bn256::G1Affine>, coeff_254:&Vec<bn256::Fr>, new_coeff:&mut Vec<BigInteger256>,new_base: &mut Vec<GroupAffine<Parameters>>,test_scale:usize) 
+{
+    // 异步数据传输阶段，将数据传输到GPU中
     let cpu_num = num_cpus::get();
-    println!("cpu_num: {:?}", cpu_num);
-    // 产生测试数据集
-    let test_scale = 1 << 24;
-    let instant = Instant::now();
-    let base_254 = Arc::new(h2c_rand_gen(test_scale));
-    let coeff_254 = Arc::new(scalar_rand_gen(test_scale));
-    println!("产生数据集时间：{}",instant.elapsed().as_millis());
-    // let ret_254 = small_multiexp(&coeff_254.as_slice(), &base_254.as_slice());
-    let start_time_1 = Instant::now();
-    let ret_best = best_multiexp(&coeff_254, &base_254);
-    println!("start_time_1 {:?}",start_time_1.elapsed().as_millis());
-
-    let ret_h2c_best = multi_scalar_mult_halo2curve(&base_254,&coeff_254);
-
-    // assert_eq!(ret_best.to_affine(), ret_h2c_best.to_affine());
-
-
-    // 开辟线程
     let mut handles = Vec::new();
     let avg = test_scale / (cpu_num * 2 / 5);
     let thread_num = test_scale / avg + 1;
@@ -129,7 +75,6 @@ fn test_small_exp(c: &mut Criterion) {
 
     // 基本数据通道
     let (tx, rx) = channel();
-    let instantX = Instant::now();
     for variable_i in 0..thread_num {
         let base_pointer = base_254.clone();
         let coeff_pointer = coeff_254.clone();
@@ -158,7 +103,6 @@ fn test_small_exp(c: &mut Criterion) {
     for handle in handles {
         handle.join().unwrap();
     }
-    println!("数据通道时间：{}",instantX.elapsed().as_millis());
     let handle = thread::spawn(move || {
         // 设定转换接收数组
         let mut ark_coeff = Vec::with_capacity(test_scale);
@@ -180,29 +124,76 @@ fn test_small_exp(c: &mut Criterion) {
         return (ark_coeff, ark_base);
     });
 
+     ( *new_coeff,  *new_base) = handle.join().unwrap();
+    // new_base = ark_base.as_slice();
+
+
+}
+
+async fn gpu_compute(
+    new_coeff:&mut Vec<BigInteger256>,new_base: &mut Vec<GroupAffine<Parameters>>
+) -> GroupProjective<Parameters>{
+    multi_scalar_mult_arkworks(new_base,new_coeff)
+}
 
 
 
-    let (ark_coeff, ark_base) = handle.join().unwrap();
+async fn test_small_exp(c: &mut Criterion) {
+    let mut rng = OsRng;
 
-    println!("多线程時长: {}", start_time_3.elapsed().as_millis());
+ 
 
-    // let ark_msm_result =
-    //         VariableBaseMSM::multi_scalar_mul(&ark_base.as_slice(), &ark_coeff.as_slice());
-    let start_time_3 = Instant::now();
+    // // 获取当前CPU的内核数（逻辑），执行多线程并行策略
+    let cpu_num = num_cpus::get();
+    println!("cpu_num: {:?}", cpu_num);
+    // 产生测试数据集
+    let test_scale = 1 << 24;
+    let instant = Instant::now();
+    let base_254 = Arc::new(h2c_rand_gen(test_scale));
+    let coeff_254 = Arc::new(scalar_rand_gen(test_scale));
+    println!("产生数据集时间：{}",instant.elapsed().as_millis());
+    // let ret_254 = small_multiexp(&coeff_254.as_slice(), &base_254.as_slice());
+    let start_time_1 = Instant::now();
+    let ret_best = best_multiexp(&coeff_254, &base_254);
 
-    let gpu_result = multi_scalar_mult_arkworks(&ark_base.as_slice(), &ark_coeff.as_slice());
+    let mut group = 128;
+    let mut gap = test_scale / group;
+    let mut starti: usize = gap;
+    let mut endi = gap;
 
-    println!("计算时长: {}", start_time_3.elapsed().as_millis());
+    for i in 0..group{
+        let mut ark_coeff = Vec::new();
+        let mut ark_base = Vec::new();
+        let data_preparation_handle = task::spawn(curve_transfer(&base_254[starti..endi].to_vec(), &coeff_254[starti..endi].to_vec(), &mut ark_coeff,&mut ark_base, gap));
+        let gpu_task_handle = task::spawn(gpu_compute(&mut ark_coeff, &mut ark_base));
+        let _ = tokio::try_join!(data_preparation_handle, gpu_task_handle);
+        starti += gap;
+        endi += gap;
+    }
+    println!("start_time_1 {:?}",start_time_1.elapsed().as_millis());
 
-    let start_time_3 = Instant::now();
 
-    let ark_back = transform::ark_to_h2c_point(gpu_result).to_affine();
+    // curve_transfer(&base_254,&coeff_254,&mut ark_coeff,&mut ark_base,test_scale).await;
 
-    println!("转换回时长: {}", start_time_3.elapsed().as_millis());
+    
 
 
-    assert_eq!(ret_best.to_affine(), ark_back);
+    // // let ark_msm_result =
+    // //         VariableBaseMSM::multi_scalar_mul(&ark_base.as_slice(), &ark_coeff.as_slice());
+    // let start_time_3 = Instant::now();
+
+    // // let gpu_result = multi_scalar_mult_arkworks(&ark_base.as_slice(), &ark_coeff.as_slice());
+
+    // println!("计算时长: {}", start_time_3.elapsed().as_millis());
+
+    // let start_time_3 = Instant::now();
+
+    // // let ark_back = transform::ark_to_h2c_point(gpu_result).to_affine();
+
+    // println!("转换回时长: {}", start_time_3.elapsed().as_millis());
+
+
+    // assert_eq!(ret_best.to_affine(), ark_back);
 
 
 

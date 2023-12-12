@@ -25,11 +25,13 @@ rustdoc-args = ["--cfg", "docsrs", "--html-in-header", "katex-header.html"]
 
 
 [[bench]]
-name = "fft"
+name = "test_multi"
 harness = false
 
 [dependencies]
 backtrace = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["full"] }
+
 rayon = "1.5.1"
 ff = "0.13"
 group = "0.13"
